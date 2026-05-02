@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -62,7 +63,9 @@ async def main():
     if not OPENAI_API_KEY:
         raise RuntimeError("OPENAI_API_KEY is not set in .env")
 
-    bot = Bot(token=BOT_TOKEN)
+    tg_session = AiohttpSession()
+    tg_session._connector_init = {"ssl": False}
+    bot = Bot(token=BOT_TOKEN, session=tg_session)
     dp = Dispatcher(storage=MemoryStorage())
     oai = AsyncOpenAI(api_key=OPENAI_API_KEY)
 
