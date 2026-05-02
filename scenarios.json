@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "defaults": { "showTranscript": false, "language": "ru" },
+  "scenarios": [
+    {
+      "id": "verbatim",
+      "buttonTitle": "Дословно",
+      "pipeline": ["stt"],
+      "deliver": "file_txt",
+      "description": "Строго дословная расшифровка, выдача только .txt"
+    },
+    {
+      "id": "message",
+      "buttonTitle": "Сообщение",
+      "pipeline": ["stt", "llm"],
+      "deliver": "chat",
+      "description": "Короткое готовое сообщение",
+      "prompt": "Сделай короткое сообщение по итогам транскрипта. 1-2 абзаца, без воды, с понятным CTA."
+    }
+  ]
+}
