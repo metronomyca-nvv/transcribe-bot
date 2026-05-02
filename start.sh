@@ -5,18 +5,14 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 cd "$SCRIPT_DIR"
 
 # --- Python check ---
-if command -v python3 &>/dev/null; then
-    PYTHON=python3
-elif command -v python &>/dev/null; then
-    PYTHON=python
+if command -v python3.11 &>/dev/null; then
+    PYTHON=python3.11
+elif command -v python3.12 &>/dev/null; then
+    PYTHON=python3.12
+elif command -v python3.13 &>/dev/null; then
+    PYTHON=python3.13
 else
-    echo "Python не найден. Скачай и установи с https://www.python.org/downloads/"
-    exit 1
-fi
-
-PY_VERSION=$($PYTHON -c "import sys; print(sys.version_info.minor)")
-if [ "$PY_VERSION" -lt 11 ]; then
-    echo "Нужен Python 3.11 или новее. Текущая версия: $($PYTHON --version)"
+    echo "Python 3.11+ не найден. Установи через: brew install python@3.11"
     exit 1
 fi
 
