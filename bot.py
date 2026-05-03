@@ -2,7 +2,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import date, datetime
+from datetime import date
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
@@ -38,10 +38,26 @@ DATA_DIR.mkdir(exist_ok=True)
 
 ADMIN_IDS: set[int] = {int(x) for x in ADMIN_IDS_RAW.split(",") if x.strip().isdigit()}
 
-# Стоимость OpenAI (USD)
 WHISPER_COST_PER_MIN = 0.006
 GPT_INPUT_COST_PER_1K = 0.000150
 GPT_OUTPUT_COST_PER_1K = 0.000600
+
+HELP_TEXT = """*Что умеет бот*
+Бот принимает голосовые сообщения и аудиофайлы и выдаёт результат в выбранном формате (сценарии/кнопки).
+
+*Быстрый старт*
+1) Отправьте голосовое сообщение или файл аудио/видео (mp4/m4a)
+2) Дождитесь меню сценариев и выберите нужную кнопку
+3) Получите результат в чате или файлом
+
+*Что такое сценарии*
+Сценарии — это кнопки, которые определяют в каком виде бот оформит результат (например: "Дословно", "ТЗ", "Резюме встречи", "Мысли/заметки").
+
+*Как узнать свой Telegram ID*
+Отправьте команду /whoami
+
+*Доступ и подключение*
+Отправьте администратору ваш Telegram ID (из /whoami). После подключения бот пришлёт уведомление в личные сообщения."""
 
 
 # --- Users ---
@@ -160,11 +176,7 @@ async def apply_llm(client: AsyncOpenAI, transcript: str, scenario: dict) -> tup
     prompt = scenario["prompt"]
     template = scenario.get("template")
     if template:
-        system = (
-            f"{prompt}\n\n"
-            f"Заполни следующий шаблон на основе транскрипта. "
-            f"Выведи ТОЛЬКО заполненный шаблон:\n\n{template}"
-        )
+        system = f"{prompt}\n\nЗаполни следующий шаблон на основе транскрипта. Выведи ТОЛЬКО заполненный шаблон:\n\n{template}"
     else:
         system = prompt
     response = await client.chat.completions.create(
@@ -176,6 +188,20 @@ async def apply_llm(client: AsyncOpenAI, transcript: str, scenario: dict) -> tup
     )
     usage = response.usage
     return response.choices[0].message.content, usage.prompt_tokens, usage.completion_tokens
+
+
+async def generate_filename(client: AsyncOpenAI, text: str, file_name_prompt: str) -> str:
+    today = date.today().strftime("%d-%m-%Y")
+    response = await client.chat.completions.create(
+        model="gpt-4o-mini",
+        messages=[
+            {"role": "system", "content": file_name_prompt},
+            {"role": "user", "content": text[:1000]},
+        ],
+        max_tokens=30,
+    )
+    name = response.choices[0].message.content.strip().replace(" ", "-").replace("/", "-")
+    return f"{today}_{name}.txt"
 
 
 async def main():
@@ -212,13 +238,40 @@ async def main():
     async def start(message: Message, state: FSMContext):
         await state.clear()
         register_user(users_data, message.from_user)
-        if not is_allowed(message.from_user.id):
-            await message.answer("У вас нет доступа к боту. Обратитесь к администратору.")
+        uid = message.from_user.id
+        if not is_allowed(uid):
+            await message.answer(
+                f"Привет! Я голосовой бот группы «Метрономика».\n"
+                f"Вы пока не подключены.\n\n"
+                f"Ваш Telegram ID: `{uid}`\n"
+                f"Передайте его администратору для получения доступа.",
+                parse_mode="Markdown",
+            )
             return
         await message.answer(
-            "Привет! Отправь голосовое сообщение или аудиофайл — я его расшифрую.\n"
-            "После этого выбери сценарий обработки.",
+            f"Привет! Я голосовой бот группы «Метрономика» — делаю текст из аудио и голосовых сообщений.\n\n"
+            f"Отправьте голосовое или файл (mp4/m4a) — я покажу меню сценариев.\n\n"
+            f"Ваш Telegram ID: `{uid}`\n"
+            f"Команды: /help — помощь, /whoami — показать ваш ID.",
+            parse_mode="Markdown",
         )
+
+    @dp.message(Command("whoami"), StateFilter("*"))
+    async def cmd_whoami(message: Message):
+        register_user(users_data, message.from_user)
+        uid = message.from_user.id
+        username = f"@{message.from_user.username}" if message.from_user.username else "не задан"
+        await message.answer(
+            f"Ваш Telegram ID: `{uid}`\n"
+            f"Username: {username}\n\n"
+            f"Передайте ID администратору для подключения или изменения сценариев. "
+            f"После подключения бот пришлёт вам уведомление в личные сообщения.",
+            parse_mode="Markdown",
+        )
+
+    @dp.message(Command("help"), StateFilter("*"))
+    async def cmd_help(message: Message):
+        await message.answer(HELP_TEXT, parse_mode="Markdown")
 
     @dp.message(Command("add"), StateFilter("*"))
     async def cmd_add(message: Message):
@@ -246,6 +299,15 @@ async def main():
         info = users_data["registry"].get(str(uid), {"id": uid})
         await message.answer(f"Добавлен: {user_label(info)}")
         log.info("Admin %s added user %s", message.from_user.id, uid)
+        # Уведомление новому пользователю
+        try:
+            await bot.send_message(
+                uid,
+                "Привет! Вас подключили к голосовому боту группы «Метрономика».\n"
+                "Перейдите @golos_m2_bot — нажмите /start, чтобы начать.",
+            )
+        except Exception:
+            pass
 
     @dp.message(Command("remove"), StateFilter("*"))
     async def cmd_remove(message: Message):
@@ -299,24 +361,23 @@ async def main():
             f"Месяц: ${monthly:.4f} / ${MONTHLY_BUDGET_USD:.2f}"
         )
 
-    @dp.message(Command("myid"), StateFilter("*"))
-    async def cmd_myid(message: Message):
-        register_user(users_data, message.from_user)
-        await message.answer(f"Ваш Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
-
     @dp.message(F.voice | F.audio | F.video | F.document)
     async def handle_audio(message: Message, state: FSMContext):
         if not is_allowed(message.from_user.id):
-            await message.answer("У вас нет доступа к боту.")
+            uid = message.from_user.id
+            await message.answer(
+                f"У вас нет доступа к боту.\n\n"
+                f"Ваш Telegram ID: `{uid}`\n"
+                f"Передайте его администратору для получения доступа.",
+                parse_mode="Markdown",
+            )
             return
         register_user(users_data, message.from_user)
 
-        # Лимит запросов в день
         if get_user_requests_today(stats, message.from_user.id) >= MAX_REQUESTS_PER_DAY:
             await message.answer(f"Вы достигли лимита {MAX_REQUESTS_PER_DAY} запросов в день. Попробуйте завтра.")
             return
 
-        # Бюджет-лимит
         if get_daily_cost(stats) >= DAILY_BUDGET_USD:
             await message.answer("Дневной бюджет бота исчерпан. Обратитесь к администратору.")
             return
@@ -339,7 +400,6 @@ async def main():
         else:
             return
 
-        # Лимит размера файла
         max_bytes = MAX_FILE_MB * 1024 * 1024
         if file_size > max_bytes:
             await message.answer(f"Файл слишком большой. Максимум {MAX_FILE_MB:.0f} МБ.")
@@ -347,7 +407,7 @@ async def main():
 
         await state.update_data(file_id=file_id, file_size=file_size)
         await state.set_state(UserState.waiting_for_scenario)
-        await message.answer("Файл получен. Выбери сценарий:", reply_markup=kb)
+        await message.answer("Голос получил. Приступаю…\n\nВыберите сценарий для текста:", reply_markup=kb)
 
     @dp.message(UserState.waiting_for_scenario, F.text.in_(list(title_to_scenario.keys())))
     async def process_scenario(message: Message, state: FSMContext):
@@ -357,7 +417,7 @@ async def main():
         scenario = title_to_scenario[message.text]
         await state.clear()
 
-        status_msg = await message.answer("⏳ Скачиваю и расшифровываю...")
+        status_msg = await message.answer(f"Отлично, делаю: {message.text}. Работа может занять пару минут.")
 
         tg_file = await bot.get_file(file_id)
         suffix = Path(tg_file.file_path).suffix or ".ogg"
@@ -371,43 +431,50 @@ async def main():
 
             input_tokens = output_tokens = 0
             if "llm" in scenario.get("pipeline", []):
-                await status_msg.edit_text("⏳ Обрабатываю текст...")
                 result_text, input_tokens, output_tokens = await apply_llm(oai, transcript, scenario)
             else:
                 result_text = transcript
 
-            # Считаем стоимость
-            audio_sec = file_size / 16000  # грубая оценка
+            audio_sec = file_size / 16000
             cost = estimate_cost(audio_sec, input_tokens, output_tokens)
             add_cost(stats, cost)
             log.info("user=%s cost=$%.5f daily=$%.4f monthly=$%.4f", message.from_user.id, cost, get_daily_cost(stats), get_monthly_cost(stats))
 
-            # Уведомление при превышении 80% бюджета
             if get_daily_cost(stats) >= DAILY_BUDGET_USD * 0.8:
                 await notify_admins(f"⚠️ Дневной бюджет использован на 80%+: ${get_daily_cost(stats):.4f} / ${DAILY_BUDGET_USD}")
             if get_monthly_cost(stats) >= MONTHLY_BUDGET_USD * 0.8:
                 await notify_admins(f"⚠️ Месячный бюджет использован на 80%+: ${get_monthly_cost(stats):.4f} / ${MONTHLY_BUDGET_USD}")
 
             if scenario.get("deliver") == "file_txt":
-                txt_path = TMP_DIR / f"{file_id}.txt"
+                file_name_prompt = scenario.get("fileNamePrompt")
+                if file_name_prompt:
+                    filename = await generate_filename(oai, result_text, file_name_prompt)
+                else:
+                    filename = f"{date.today().strftime('%d-%m-%Y')}_расшифровка.txt"
+                txt_path = TMP_DIR / filename
                 txt_path.write_text(result_text, encoding="utf-8")
                 caption = scenario.get("fileCaption", "Готово. См. файл .txt")
                 await status_msg.delete()
-                await message.answer_document(FSInputFile(txt_path), caption=caption)
+                await message.answer_document(FSInputFile(txt_path, filename=filename), caption=caption)
+                await message.answer("Готово! Жду новых голосов!")
                 txt_path.unlink(missing_ok=True)
             else:
                 await status_msg.edit_text(result_text)
+                await message.answer("Готово! Жду новых голосов!")
 
         except Exception as e:
             log.error("Error processing scenario %s for user %s: %s", scenario["id"], message.from_user.id, e)
-            await status_msg.edit_text("Произошла ошибка при обработке. Попробуй ещё раз.")
+            await status_msg.edit_text(
+                "Не получилось обработать файл. Попробуйте отправить ещё раз или другим форматом.\n"
+                "Если повторяется — напишите администратору и пришлите время/описание."
+            )
 
         finally:
             tmp_path.unlink(missing_ok=True)
 
     @dp.message(F.text.in_(list(title_to_scenario.keys())))
     async def scenario_without_audio(message: Message):
-        await message.answer("Сначала отправь голосовое сообщение или аудиофайл.")
+        await message.answer("Голос получил. Приступаю…\n\nВыберите сценарий для текста:", reply_markup=kb)
 
     log.info("Bot started")
     await dp.start_polling(bot)
