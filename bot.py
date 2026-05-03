@@ -241,12 +241,12 @@ async def main():
         uid = message.from_user.id
         if not is_allowed(uid):
             await message.answer(
-                f"Привет! Я голосовой бот группы «Метрономика».\n"
-                f"Вы пока не подключены.\n\n"
-                f"Ваш Telegram ID: `{uid}`\n"
-                f"Передайте его администратору для получения доступа.",
-                parse_mode="Markdown",
+                "Привет! Я голосовой бот группы «Метрономика».\n"
+                "Вы пока не подключены.\n\n"
+                "Передайте ваш Telegram ID администратору для получения доступа. "
+                "После подключения бот пришлёт вам уведомление в личные сообщения."
             )
+            await message.answer(f"`{uid}`", parse_mode="Markdown")
             return
         await message.answer(
             f"Привет! Я голосовой бот группы «Метрономика» — делаю текст из аудио и голосовых сообщений.\n\n"
@@ -366,11 +366,11 @@ async def main():
         if not is_allowed(message.from_user.id):
             uid = message.from_user.id
             await message.answer(
-                f"У вас нет доступа к боту.\n\n"
-                f"Ваш Telegram ID: `{uid}`\n"
-                f"Передайте его администратору для получения доступа.",
-                parse_mode="Markdown",
+                "У вас нет доступа к боту.\n\n"
+                "Передайте ваш Telegram ID администратору для получения доступа. "
+                "После подключения бот пришлёт вам уведомление в личные сообщения."
             )
+            await message.answer(f"`{uid}`", parse_mode="Markdown")
             return
         register_user(users_data, message.from_user)
 
