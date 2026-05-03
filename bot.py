@@ -6,7 +6,7 @@ from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F
 from aiogram.client.session.aiohttp import AiohttpSession
-from aiogram.filters import Command, CommandStart
+from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
@@ -108,7 +108,7 @@ async def main():
     def is_allowed(user_id: int) -> bool:
         return user_id in ADMIN_IDS or user_id in whitelist
 
-    @dp.message(CommandStart())
+    @dp.message(CommandStart(), StateFilter("*"))
     async def start(message: Message, state: FSMContext):
         await state.clear()
         if not is_allowed(message.from_user.id):
@@ -119,7 +119,7 @@ async def main():
             "После этого выбери сценарий обработки.",
         )
 
-    @dp.message(Command("add"))
+    @dp.message(Command("add"), StateFilter("*"))
     async def cmd_add(message: Message):
         if message.from_user.id not in ADMIN_IDS:
             return
@@ -133,7 +133,7 @@ async def main():
         await message.answer(f"Пользователь {uid} добавлен.")
         log.info("Admin %s added user %s", message.from_user.id, uid)
 
-    @dp.message(Command("remove"))
+    @dp.message(Command("remove"), StateFilter("*"))
     async def cmd_remove(message: Message):
         if message.from_user.id not in ADMIN_IDS:
             return
@@ -147,7 +147,7 @@ async def main():
         await message.answer(f"Пользователь {uid} удалён.")
         log.info("Admin %s removed user %s", message.from_user.id, uid)
 
-    @dp.message(Command("users"))
+    @dp.message(Command("users"), StateFilter("*"))
     async def cmd_users(message: Message):
         if message.from_user.id not in ADMIN_IDS:
             return
@@ -156,7 +156,7 @@ async def main():
         else:
             await message.answer("Whitelist пуст.")
 
-    @dp.message(Command("myid"))
+    @dp.message(Command("myid"), StateFilter("*"))
     async def cmd_myid(message: Message):
         await message.answer(f"Ваш Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
