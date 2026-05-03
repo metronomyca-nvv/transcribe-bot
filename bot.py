@@ -10,7 +10,7 @@ from aiogram.filters import Command, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import FSInputFile, KeyboardButton, Message, ReplyKeyboardMarkup
+from aiogram.types import FSInputFile, KeyboardButton, Message, ReplyKeyboardMarkup, User
 from dotenv import load_dotenv
 from openai import AsyncOpenAI
 
@@ -23,22 +23,31 @@ BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 ADMIN_IDS_RAW = os.getenv("ADMIN_IDS", "")
 SCENARIOS_PATH = Path(__file__).parent / "scenarios.json"
-WHITELIST_PATH = Path(__file__).parent / "data" / "whitelist.json"
+DATA_DIR = Path(__file__).parent / "data"
+USERS_PATH = DATA_DIR / "users.json"
 TMP_DIR = Path(__file__).parent / "tmp"
 TMP_DIR.mkdir(exist_ok=True)
-WHITELIST_PATH.parent.mkdir(exist_ok=True)
+DATA_DIR.mkdir(exist_ok=True)
 
 ADMIN_IDS: set[int] = {int(x) for x in ADMIN_IDS_RAW.split(",") if x.strip().isdigit()}
 
 
-def load_whitelist() -> set[int]:
-    if WHITELIST_PATH.exists():
-        return set(json.loads(WHITELIST_PATH.read_text(encoding="utf-8")))
-    return set()
+def load_users() -> dict:
+    if USERS_PATH.exists():
+        return json.loads(USERS_PATH.read_text(encoding="utf-8"))
+    return {"whitelist": [], "registry": {}}
 
 
-def save_whitelist(whitelist: set[int]):
-    WHITELIST_PATH.write_text(json.dumps(list(whitelist)), encoding="utf-8")
+def save_users(data: dict):
+    USERS_PATH.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def user_label(info: dict) -> str:
+    name = info.get("first_name", "")
+    if info.get("last_name"):
+        name += f" {info['last_name']}"
+    username = f" @{info['username']}" if info.get("username") else ""
+    return f"{info['id']} —{username} {name}".strip()
 
 
 def load_scenarios():
@@ -53,6 +62,17 @@ def build_keyboard(scenarios):
 
 class UserState(StatesGroup):
     waiting_for_scenario = State()
+
+
+def register_user(users_data: dict, tg_user: User):
+    uid = str(tg_user.id)
+    users_data["registry"][uid] = {
+        "id": tg_user.id,
+        "username": tg_user.username,
+        "first_name": tg_user.first_name,
+        "last_name": tg_user.last_name,
+    }
+    save_users(users_data)
 
 
 async def transcribe(client: AsyncOpenAI, audio_path: Path, language: str = "ru") -> str:
@@ -103,14 +123,15 @@ async def main():
     title_to_scenario = {s["buttonTitle"]: s for s in scenarios}
     language = defaults.get("language", "ru")
 
-    whitelist = load_whitelist()
+    users_data = load_users()
 
     def is_allowed(user_id: int) -> bool:
-        return user_id in ADMIN_IDS or user_id in whitelist
+        return user_id in ADMIN_IDS or user_id in users_data["whitelist"]
 
     @dp.message(CommandStart(), StateFilter("*"))
     async def start(message: Message, state: FSMContext):
         await state.clear()
+        register_user(users_data, message.from_user)
         if not is_allowed(message.from_user.id):
             await message.answer("У вас нет доступа к боту. Обратитесь к администратору.")
             return
@@ -124,13 +145,27 @@ async def main():
         if message.from_user.id not in ADMIN_IDS:
             return
         parts = message.text.split()
-        if len(parts) != 2 or not parts[1].isdigit():
+        if len(parts) != 2:
             await message.answer("Использование: /add <user_id>")
             return
-        uid = int(parts[1])
-        whitelist.add(uid)
-        save_whitelist(whitelist)
-        await message.answer(f"Пользователь {uid} добавлен.")
+        arg = parts[1].lstrip("@")
+        # поиск по ID или username
+        uid = None
+        if arg.isdigit():
+            uid = int(arg)
+        else:
+            for info in users_data["registry"].values():
+                if info.get("username", "").lower() == arg.lower():
+                    uid = info["id"]
+                    break
+        if uid is None:
+            await message.answer(f"Пользователь '{arg}' не найден. Он должен сначала написать боту /start.")
+            return
+        if uid not in users_data["whitelist"]:
+            users_data["whitelist"].append(uid)
+            save_users(users_data)
+        info = users_data["registry"].get(str(uid), {"id": uid})
+        await message.answer(f"Добавлен: {user_label(info)}")
         log.info("Admin %s added user %s", message.from_user.id, uid)
 
     @dp.message(Command("remove"), StateFilter("*"))
@@ -138,26 +173,44 @@ async def main():
         if message.from_user.id not in ADMIN_IDS:
             return
         parts = message.text.split()
-        if len(parts) != 2 or not parts[1].isdigit():
-            await message.answer("Использование: /remove <user_id>")
+        if len(parts) != 2:
+            await message.answer("Использование: /remove <user_id или @username>")
             return
-        uid = int(parts[1])
-        whitelist.discard(uid)
-        save_whitelist(whitelist)
-        await message.answer(f"Пользователь {uid} удалён.")
+        arg = parts[1].lstrip("@")
+        uid = None
+        if arg.isdigit():
+            uid = int(arg)
+        else:
+            for info in users_data["registry"].values():
+                if info.get("username", "").lower() == arg.lower():
+                    uid = info["id"]
+                    break
+        if uid is None:
+            await message.answer(f"Пользователь '{arg}' не найден.")
+            return
+        if uid in users_data["whitelist"]:
+            users_data["whitelist"].remove(uid)
+            save_users(users_data)
+        info = users_data["registry"].get(str(uid), {"id": uid})
+        await message.answer(f"Удалён: {user_label(info)}")
         log.info("Admin %s removed user %s", message.from_user.id, uid)
 
     @dp.message(Command("users"), StateFilter("*"))
     async def cmd_users(message: Message):
         if message.from_user.id not in ADMIN_IDS:
             return
-        if whitelist:
-            await message.answer("Пользователи в whitelist:\n" + "\n".join(str(u) for u in whitelist))
-        else:
+        if not users_data["whitelist"]:
             await message.answer("Whitelist пуст.")
+            return
+        lines = []
+        for uid in users_data["whitelist"]:
+            info = users_data["registry"].get(str(uid), {"id": uid})
+            lines.append(user_label(info))
+        await message.answer("Пользователи:\n" + "\n".join(lines))
 
     @dp.message(Command("myid"), StateFilter("*"))
     async def cmd_myid(message: Message):
+        register_user(users_data, message.from_user)
         await message.answer(f"Ваш Telegram ID: `{message.from_user.id}`", parse_mode="Markdown")
 
     @dp.message(F.voice | F.audio | F.video | F.document)
@@ -165,6 +218,7 @@ async def main():
         if not is_allowed(message.from_user.id):
             await message.answer("У вас нет доступа к боту.")
             return
+        register_user(users_data, message.from_user)
 
         if message.voice:
             file_id = message.voice.file_id
