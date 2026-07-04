@@ -376,14 +376,14 @@ async def main():
         register_user(users_data, message.from_user)
 
         if get_user_requests_today(stats, message.from_user.id) >= MAX_REQUESTS_PER_DAY:
-            await message.answer(f"Вы достигли лимита {MAX_REQUESTS_PER_DAY} запросов в день. Попробуйте завтра.")
+            await message.answer(f"*Лимит запросов* исчерпан: {MAX_REQUESTS_PER_DAY} в день. Попробуйте завтра.", parse_mode="Markdown")
             return
 
         if get_daily_cost(stats) >= DAILY_BUDGET_USD:
-            await message.answer("Дневной бюджет бота исчерпан. Обратитесь к администратору.")
+            await message.answer("*Дневной бюджет* бота исчерпан. Обратитесь к администратору.", parse_mode="Markdown")
             return
         if get_monthly_cost(stats) >= MONTHLY_BUDGET_USD:
-            await message.answer("Месячный бюджет бота исчерпан. Обратитесь к администратору.")
+            await message.answer("*Месячный бюджет* бота исчерпан. Обратитесь к администратору.", parse_mode="Markdown")
             return
 
         if message.voice:
@@ -408,7 +408,7 @@ async def main():
 
         await state.update_data(file_id=file_id, file_size=file_size)
         await state.set_state(UserState.waiting_for_scenario)
-        await message.answer("Голос получил. Приступаю…\n\nВыберите сценарий для текста:", reply_markup=kb)
+        await message.answer("*Голос получил.* Приступаю…\n\nВыберите сценарий для текста:", reply_markup=kb, parse_mode="Markdown")
 
     @dp.message(UserState.waiting_for_scenario, F.text.in_(list(title_to_scenario.keys())))
     async def process_scenario(message: Message, state: FSMContext):
@@ -418,7 +418,7 @@ async def main():
         scenario = title_to_scenario[message.text]
         await state.clear()
 
-        status_msg = await message.answer(f"Отлично, делаю: {message.text}. Работа может занять пару минут.")
+        status_msg = await message.answer(f"Отлично, делаю: *{message.text}*. Работа может занять пару минут.", parse_mode="Markdown")
 
         tg_file = await bot.get_file(file_id)
         suffix = Path(tg_file.file_path).suffix or ".ogg"
@@ -457,11 +457,11 @@ async def main():
                 caption = scenario.get("fileCaption", "Готово. См. файл .txt")
                 await status_msg.delete()
                 await message.answer_document(FSInputFile(txt_path, filename=filename), caption=caption)
-                await message.answer("Готово! Жду новых голосов!")
+                await message.answer("*Готово!* Жду новых голосов!", parse_mode="Markdown")
                 txt_path.unlink(missing_ok=True)
             else:
-                await status_msg.edit_text(result_text)
-                await message.answer("Готово! Жду новых голосов!")
+                await status_msg.edit_text(result_text, parse_mode="Markdown")
+                await message.answer("*Готово!* Жду новых голосов!", parse_mode="Markdown")
 
         except Exception as e:
             log.error("Error processing scenario %s for user %s: %s", scenario["id"], message.from_user.id, e)
@@ -475,7 +475,7 @@ async def main():
 
     @dp.message(F.text.in_(list(title_to_scenario.keys())))
     async def scenario_without_audio(message: Message):
-        await message.answer("Голос получил. Приступаю…\n\nВыберите сценарий для текста:", reply_markup=kb)
+        await message.answer("*Голос получил.* Приступаю…\n\nВыберите сценарий для текста:", reply_markup=kb, parse_mode="Markdown")
 
     log.info("Bot started")
     await dp.start_polling(bot)
