@@ -70,6 +70,45 @@ docker ps --filter name=transcribe-bot
 docker logs --tail 100 transcribe-bot
 ```
 
+## Yandex webhook capture mode
+
+There is a separate profile-driven service for receiving raw Yandex webhook payloads without replacing the Telegram bot.
+
+Default environment:
+
+```env
+YANDEX_WEBHOOK_PORT=8080
+YANDEX_WEBHOOK_PATH=/webhooks/yandex
+```
+
+Start the receiver:
+
+```bash
+cd /root/transcribe-bot
+docker compose --profile yandex up -d yandex-webhook
+```
+
+Check status and logs:
+
+```bash
+docker ps --filter name=transcribe-bot-yandex-webhook
+docker logs --tail 100 transcribe-bot-yandex-webhook
+```
+
+Healthcheck:
+
+```bash
+curl http://127.0.0.1:${YANDEX_WEBHOOK_PORT:-8080}/healthz
+```
+
+Webhook requests are captured to:
+
+```text
+data/yandex_webhook_last.json
+```
+
+This receiver currently acknowledges the request and stores the raw payload plus headers summary. It is intended as the first integration step while the exact Yandex payload schema is being verified.
+
 ## Current repo hygiene rules
 
 - `data/` is runtime state and should stay out of git.

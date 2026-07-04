@@ -8,3 +8,21 @@ services:
     volumes:
       - ./data:/app/data
       - ./tmp:/app/tmp
+
+  yandex-webhook:
+    build: .
+    container_name: transcribe-bot-yandex-webhook
+    restart: unless-stopped
+    profiles:
+      - yandex
+    command: ["python", "yandex_webhook.py"]
+    env_file:
+      - .env
+    environment:
+      YANDEX_WEBHOOK_HOST: 0.0.0.0
+      YANDEX_WEBHOOK_PORT: ${YANDEX_WEBHOOK_PORT:-8080}
+      YANDEX_WEBHOOK_PATH: ${YANDEX_WEBHOOK_PATH:-/webhooks/yandex}
+    ports:
+      - "${YANDEX_WEBHOOK_PORT:-8080}:${YANDEX_WEBHOOK_PORT:-8080}"
+    volumes:
+      - ./data:/app/data
